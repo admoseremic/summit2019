@@ -1,0 +1,183 @@
+1	PURCHASE
+2	PRODUCT_VIEW
+10	SHOPPING_CART_OPEN
+11	SHOPPING_CART_CHECKOUT
+12	SHOPPING_CART_ADD
+13	SHOPPING_CART_REMOVE
+14	SHOPPING_CART_VIEW
+20	instance of campaign
+100	instance of evar1
+101	instance of evar2
+102	instance of evar3
+103	instance of evar4
+104	instance of evar5
+105	instance of evar6
+106	instance of evar7
+107	instance of evar8
+108	instance of evar9
+109	instance of evar10
+110	instance of evar11
+111	instance of evar12
+112	instance of evar13
+113	instance of evar14
+114	instance of evar15
+115	instance of evar16
+116	instance of evar17
+117	instance of evar18
+118	instance of evar19
+119	instance of evar20
+120	instance of evar21
+121	instance of evar22
+122	instance of evar23
+123	instance of evar24
+124	instance of evar25
+125	instance of evar26
+126	instance of evar27
+127	instance of evar28
+128	instance of evar29
+129	instance of evar30
+130	instance of evar31
+131	instance of evar32
+132	instance of evar33
+133	instance of evar34
+134	instance of evar35
+135	instance of evar36
+136	instance of evar37
+137	instance of evar38
+138	instance of evar39
+139	instance of evar40
+140	instance of evar41
+141	instance of evar42
+142	instance of evar43
+143	instance of evar44
+144	instance of evar45
+145	instance of evar46
+146	instance of evar47
+147	instance of evar48
+148	instance of evar49
+149	instance of evar50
+150	instance of evar51
+151	instance of evar52
+152	instance of evar53
+153	instance of evar54
+154	instance of evar55
+155	instance of evar56
+156	instance of evar57
+157	instance of evar58
+158	instance of evar59
+159	instance of evar60
+160	instance of evar61
+161	instance of evar62
+162	instance of evar63
+163	instance of evar64
+164	instance of evar65
+165	instance of evar66
+166	instance of evar67
+167	instance of evar68
+168	instance of evar69
+169	instance of evar70
+170	instance of evar71
+171	instance of evar72
+172	instance of evar73
+173	instance of evar74
+174	instance of evar75
+200	event1
+201	event2
+202	event3
+203	event4
+204	event5
+205	event6
+206	event7
+207	event8
+208	event9
+209	event10
+210	event11
+211	event12
+212	event13
+213	event14
+214	event15
+215	event16
+216	event17
+217	event18
+218	event19
+219	event20
+220	event21
+221	event22
+222	event23
+223	event24
+224	event25
+225	event26
+226	event27
+227	event28
+228	event29
+229	event30
+230	event31
+231	event32
+232	event33
+233	event34
+234	event35
+235	event36
+236	event37
+237	event38
+238	event39
+239	event40
+240	event41
+241	event42
+242	event43
+243	event44
+244	event45
+245	event46
+246	event47
+247	event48
+248	event49
+249	event50
+250	event51
+251	event52
+252	event53
+253	event54
+254	event55
+255	event56
+256	event57
+257	event58
+258	event59
+259	event60
+260	event61
+261	event62
+262	event63
+263	event64
+264	event65
+265	event66
+266	event67
+267	event68
+268	event69
+269	event70
+270	event71
+271	event72
+272	event73
+273	event74
+274	event75
+275	event76
+276	event77
+277	event78
+278	event79
+279	event80
+280	event81
+281	event82
+282	event83
+283	event84
+284	event85
+285	event86
+286	event87
+287	event88
+288	event89
+289	event90
+290	event91
+291	event92
+292	event93
+293	event94
+294	event95
+295	event96
+296	event97
+297	event98
+298	event99
+299	event100
