@@ -1,5 +1,5 @@
 # Advanced Analysis with Adobe Analytics Data Feeds & R 2019
-Code and examples from the "Advanced Analysis with Adobe Analytics Data Feeds and R" session from Summit 2019
+All the code and examples from the "Advanced Analysis with Adobe Analytics Data Feeds and R" session from Summit 2019. To view each of the R notebooks, rather than clicking the links above, use these links to see the notebooks fully rendered:
 
 01 - Introduction to dplyr:
 http://htmlpreview.github.io/?https://github.com/admoseremic/summit2019/blob/master/01%20Introduction%20to%20dplyr.nb.html
