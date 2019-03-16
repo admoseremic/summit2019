@@ -5,6 +5,7 @@ All the code and examples from the "Advanced Analysis with Adobe Analytics Data 
 http://htmlpreview.github.io/?https://github.com/admoseremic/summit2019/blob/master/01%20Introduction%20to%20dplyr.nb.html
 
 02 - Preparing data feeds:
+http://htmlpreview.github.io/?https://github.com/admoseremic/summit2019/blob/master/02%20Prepare%20Data%20Feed.nb.html
 
 03 - Creating a cross-device dataset:
 
