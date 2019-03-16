@@ -2,10 +2,10 @@
 All the code and examples from the "Advanced Analysis with Adobe Analytics Data Feeds and R" session from Summit 2019. To view each of the R notebooks, rather than clicking the links above, use these links to see the notebooks fully rendered:
 
 01 - Introduction to dplyr:
-http://htmlpreview.github.io/?https://github.com/admoseremic/summit2019/blob/master/01%20Introduction%20to%20dplyr.nb.html
+http://datafeedtoolbox.com/wp-content/uploads/2019/03/01-Introduction-to-dplyr.nb_.html
 
 02 - Preparing data feeds:
-http://htmlpreview.github.io/?https://github.com/admoseremic/summit2019/blob/master/02%20Prepare%20Data%20Feed.nb.html
+
 
 03 - Creating a cross-device dataset:
 
