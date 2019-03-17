@@ -20,3 +20,4 @@ http://datafeedtoolbox.com/wp-content/uploads/2019/03/05-Visualizing-Customer-Jo
 http://datafeedtoolbox.com/wp-content/uploads/2019/03/06-Clustering-Users.nb_.html
 
 07 - Importing clusters into Adobe Analytics:
+http://datafeedtoolbox.com/wp-content/uploads/2019/03/07-Import-Clusters-to-Analytics-2.nb_.html
