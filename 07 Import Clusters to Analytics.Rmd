@@ -1,0 +1,86 @@
+---
+title: "Load Clusters Into Workspace"
+author: "Trevor Paulsen"
+output: html_notebook
+---
+
+# Convert Data Feed Visitor IDs to Hex
+The first step is translating the visitor IDs into a format that customer attributes will understand.
+
+```{r}
+library(Rmpfr)
+library(RCurl)
+
+example_vis_ids = as.data.frame(
+  c(
+    "3012860238288533203_4611687811039376400", 
+    "3012860276943234879_6917530783211035360", 
+    "3012860334925186994_6917530727911358233"
+    )
+  )
+names(example_vis_ids) = "visids"
+
+# Convert the integer visitor IDs to hex visitor IDs
+convert_to_hex = function(visitor_id){
+  visid_hi = toupper(as.character(formatMpfr(mpfr(strsplit(visitor_id,"_")[[1]][1], base=10), base=16, decimal.mark="")))
+  visid_lo = toupper(as.character(formatMpfr(mpfr(strsplit(visitor_id,"_")[[1]][2], base=10), base=16, decimal.mark="")))
+  visitor_id_hex = paste0(visid_hi,"-",visid_lo)
+  return(visitor_id_hex)
+}
+
+hex_visitor_ids = example_vis_ids %>%
+  mutate(
+    hex_visids = convert_to_hex(as.character(visids))
+  )
+
+hex_visitor_ids
+```
+
+
+# Save off file for Customer Attribute Import
+Next, we'll save a file that can be imported to the Customer Attributes feature.
+```{r}
+# Note that this technique only works on the cookie based ID, not the "stitched ID"
+
+# Combine clusters with hex values we created
+cluster_mapping = data.frame(hex_visitor_ids, export_table)
+cluster_mapping = data.frame(visitor_ids_converted_example$`Hex ID`, export_table$cluster)
+names(cluster_mapping) = c("aaid", "cluster")
+
+# Write the lookup to a file
+write.table(cluster_mapping, file="cluster_mapping.csv", sep=",", row.names = FALSE, quot=FALSE)
+
+# Prebaked Example
+cluster_mapping
+```
+
+# Fire off "setCustomerID" a bunch of times
+Now we'll actually load the data into Analytics by spoofing a setCustomerID API call.
+I've heard there's a way to do this via batch ingest, but it's not documented...
+
+What's cool about this is you don't even have to have MCID implemented for this to work!
+
+```{r}
+# setCustomerID a zillion times (try doing this in parrellel)
+
+org_id = "<YOUR IMS ORG>@AdobeOrg"
+for (i in 1:3){
+  url = paste0("https://dpm.demdex.net/id?",
+               "d_visid_ver=1.8.0&",
+               "d_fieldgroup=AAM&",
+               "d_rtbd=json&",
+               "d_ver=2&",
+               "d_orgid=", org_id, "&",
+               "d_nsid=0&",
+               "d_blob=NRX38WO0n5BH8Th-nqAG_A&",
+               "d_cid_ic=AVID%01", hex_visitor_ids$hex_visids[i], "&",
+               "d_cid_ic=aaid%01", hex_visitor_ids$hex_visids[i], "&",
+               "ts=1491014875614")
+
+  response = getURL(url = url, ssl.verifyhost = FALSE, ssl.verifypeer = FALSE, followlocation = TRUE)
+  response
+}
+```
+
+
+

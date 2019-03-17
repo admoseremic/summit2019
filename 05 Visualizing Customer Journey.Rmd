@@ -1,0 +1,219 @@
+---
+title: "Visualizing the Customer Journey"
+author: "Trevor Paulsen"
+output: html_notebook
+---
+
+Next we'll visualize the individual paths users are taking through each of the channels before conversion in two different ways - using a scatter plot as well as a sankey "flow" diagram. For this step we'll use the same "channel stack" concept we used for attribution previously, but this time we'll discard the non-onverting paths and create a new field for conversion rate.
+
+More info: http://datafeedtoolbox.com/visualizing-the-customer-journey-with-r-and-adobe-analytics-data-feeds/
+
+```{r}
+# Create a modified channel stacks data frame
+
+channel_stacks = data_feed_sequenced %>%
+  group_by(stitched_id, order_seq) %>%
+  
+  #first remove irrelevant hits:
+  filter(!is.na(non_attributed_channel) | orders>0) %>%
+  
+  #next remove repeated values with a lag function:
+  filter((non_attributed_channel != lag(non_attributed_channel, default="1")) | orders>0) %>%
+  
+  #now concatenate the sequence into a single row:
+  summarize(
+    path = paste(non_attributed_channel[which(!is.na(non_attributed_channel))], collapse=">"),
+    
+    # for Spark SQL or PostgreSQL:
+    # path = concat_ws(" > ", collect_list(non_attributed_channel))
+    
+    orders = sum(orders)
+  ) %>% ungroup() %>%
+  
+  #next roll up each unique path by count and conversion:
+  group_by(path) %>%
+  summarize(
+    orders = sum(orders),
+    path_count = n()
+  ) %>% ungroup() %>%
+  
+  #last create a conversion rate column and pull it out of Spark:
+  mutate(
+    conversion_rate = orders/path_count
+  ) %>%
+  filter(path != "") %>%
+  collect()
+
+channel_stacks
+```
+
+# Visualizing Paths with a Scatter Plot
+
+Plotly is a great visualization tool - it works great with R, Python, and other languages and the visualizations it produces are highly interactive and sharable. Here, we'll visualize the channel stacks with a cool scatter plot:
+
+```{r message=FALSE}
+# Visualizing paths with a scatter plot
+p = channel_stacks %>% plot_ly() %>% 
+  add_markers(
+    y = ~orders, 
+    x = ~path_count,
+    color = ~conversion_rate, 
+    size = ~conversion_rate,
+    text = ~path,
+    name = "Path"
+  ) %>%
+  layout(
+    xaxis = list(type="log", title="Number of Paths"),
+    yaxis = list(type="log", title="Number of Conversions")
+  ) %>% 
+  colorbar(
+    title = "Rate"
+  )
+p
+```
+
+# Visualizing the Path with a Sankey Diagram
+
+The next plot will illustrate how to represent all of these stacked channels into a cool Sankey diagram. The way the Sankey diagram works is to create an array for each "node" denoting how many users went into and out of that specific node. So first step, we'll create a node for each "step" deep we want to go for each channel:
+
+
+```{r message=FALSE}
+# Visualizing customer paths with a Sankey Diagram
+
+# Creating a list of channels for convinience
+channel_stacks$path_list = strsplit(x=channel_stacks$path,split=">")
+
+# set the depth of the Sankey Diagram
+depth = 4
+
+#Generate node labels and label length vectors
+node_labels=rep(list(list()),depth)
+label_length = list()
+for(i in 1:depth){
+  for(j in 1:length(channel_stacks$path)){
+    if(!is.na(channel_stacks$path_list[j][[1]][i]))
+      node_labels[[i]][j] = channel_stacks$path_list[j][[1]][i]
+  }
+  node_labels[[i]] = unique(unlist(node_labels[[i]]))
+  node_labels[[i]] = node_labels[[i]][order(node_labels[[i]])]
+  label_length[[i]] = length(node_labels[[i]])
+}
+node_labels = unlist(node_labels)
+label_length = unlist(label_length)
+
+node_labels
+label_length
+```
+
+# Building Sankey Nodes
+
+Once I've created those nodes, I'll have to run a bit of code to figure out how many users went to and from each of the nodes. This part is a little messy (I don't typically like to use for loops in my R code), but it works. This gives me a table for each node, the step its in, how many users are going into it, and how many users are going out of it.
+
+```{r message=FALSE}
+# Build a data frame to fill out with each path view
+combos = NULL
+for(i in 1:(depth-1)){
+  for(j in (1 + sum(label_length[1:i-1])):(label_length[i] + sum(label_length[1:i-1]))){
+    for(k in (1 + label_length[i] + sum(label_length[1:i-1])):(label_length[i+1] + label_length[i] + sum(label_length[1:i-1]))){
+      combos = rbind(combos, c(i,j,k,0))
+    } 
+  }
+}
+combos = as.data.frame(combos)
+names(combos) = c("step","source","target","value")
+
+#Populate the combo table
+for(i in 1:(dim(combos)[1])){
+  for(j in 1:(dim(channel_stacks)[1])){
+    combos$value[i] = sum(combos$value[i], ifelse(
+      (node_labels[combos$source[i]] == channel_stacks$path_list[j][[1]][combos$step[i]]) &
+      (node_labels[combos$target[i]] == channel_stacks$path_list[j][[1]][combos$step[i]+1]),
+      channel_stacks$path_count[j],0), na.rm = TRUE)
+  }
+}
+
+combos
+```
+
+# Adding a Conversion Node
+
+Lastly, I'll create a node that represents a conversion. That'll allow us to visualize how many users actually ended up in a conversion at the end of their journey.
+
+```{r message=FALSE}
+#Add a node to populate with conversion values
+uniques = unique(c(combos$source,combos$target))
+converts = as.data.frame(list("step"=rep(0,length(uniques)), "source"=uniques, "target"=rep(max(uniques)+1,length(uniques)), "value"=rep(0,length(uniques))))
+combos = rbind(combos,converts)
+for(i in 1:(dim(channel_stacks)[1])){
+  stack_depth = min(depth,length(channel_stacks$path_list[i][[1]]))
+  index_val = which(combos$step==0 & combos$source==(which(node_labels == channel_stacks$path_list[i][[1]][stack_depth]) + ifelse(stack_depth>1, sum(label_length[1:(stack_depth-1)]),0)))
+  combos$value[index_val] = combos$value[index_val] + channel_stacks$orders[i]
+}
+
+#Populate the conversion node values
+display_node_labels = node_labels
+for(i in 1:length(label_length)){
+  for(j in 1:label_length[i]){
+    display_node_labels[j+ifelse(i==1,0,sum(label_length[1:(i-1)]))] = paste0(i,":",node_labels[j+ifelse(i==1,0,sum(label_length[1:(i-1)]))])
+  }
+}
+display_node_labels = c(display_node_labels, "Conversion")
+
+```
+
+# Building the Plot
+
+And finally, I can generate the actual Sankey diagram:
+
+```{r}
+#Generate Sankey diagram
+p <- plot_ly(
+    type = "sankey",
+    orientation = "v",
+
+    node = list(
+      label = display_node_labels,
+      #color = node_colors,
+      pad = 10,
+      thickness = 30,
+      line = list(
+        color = "white",
+        width = 0
+      )
+    ),
+  
+    link = list(
+      source = combos$source-1, # convert to zero index
+      target = combos$target-1, # convert to zero index
+      value = combos$value, #size of connection
+      color = "rgba(0, 0, 0, 0.2)"
+    )
+  ) %>% 
+  layout(
+    title = "Conversion Flow Diagram",
+    font = list(
+    size = 10
+    )
+  )
+p
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

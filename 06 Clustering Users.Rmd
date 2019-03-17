@@ -1,0 +1,211 @@
+---
+title: "Clustering Your Users/Customers"
+author: "Trevor Paulsen"
+output: html_notebook
+---
+
+In this notebook, we're going to cluster our users using an unsupervised machine learning technique, then we'll also find users that are statistically likely to convert, then finally we'll upload those clusters and propensity scores to Analysis Workspace using something called "Customer Attributes" so that you can use them in reporting!
+
+```{r}
+# First step is to create visitor level aggregations to work with:
+library(stringr)
+
+user_rollups = stitched_data_feed %>%
+  group_by(stitched_id) %>%
+  summarize(
+    visits = n_distinct(visit_num),
+    hits = n(),
+    product_views = sum(ifelse(grepl(",2,", event_list), 1, 0)),
+    
+    # For Postgres or Spark SQL you'd use %~% or %regexp% as below:
+    # product_views = sum(ifelse(event_list %~% ",2,", 1, 0))
+    
+    email_sign_ups = sum(ifelse(grepl(",201,", event_list), 1, 0)),
+    internal_searches = sum(ifelse(grepl(",202,", event_list), 1, 0)),
+    discounts = sum(ifelse(grepl(",203,", event_list), 1, 0)),
+    product_views = sum(ifelse(grepl(",2,", event_list), 1, 0)),
+    
+    distinct_channels = n_distinct(channel),
+    orders = sum(ifelse(grepl(",1,", event_list), 1, 0)),
+    revenue = sum(ifelse(grepl(",200=", event_list), as.numeric(str_match(event_list, ",200=(.*?),")[,2]), 0))
+    
+    # For Postgres or Spark SQL, use:
+    # revenue = sum(ifelse(event_list %~% ",200=", as.numeric(regexp_extract(event_list, ",200=(.*?),")), 0))
+  ) %>% collect()
+
+head(user_rollups)
+
+```
+
+# Cleaning the data
+
+Clustering data from web interactions can be extremely problematic - the data is very skewed, conversions are relatively rare, and there is a lot of noise in the data. This makes most cluster models just fall apart typically. To avoid that, we'll use a combination of data filtering and a maximum liklihood cluster estimate to arrive at useful clusters.
+
+To start, I need to throw out a lot of the junk. Most sites typically have a lot of visitors with a single hit - those users are not useful and can gunk up a cluster or propensity model, so we'll first remove them. I'll also remove the user ID field, since it's not useful for modeling either.
+
+```{r}
+clean_sample = user_rollups %>%
+  filter(hits > 1) %>%
+  select(-stitched_id)
+```
+
+# Visualizing Users with tSNE
+
+Next we're going to use a really awesome dimensionality reduction techinque that's relatively new in the machine learning world. It's a technique called "t-distributed stochastic neighbor embedding." There's an awesome Google TechTalk about this approach here: https://www.youtube.com/watch?v=RJVL80Gg3lA - basically this technique is a way to map data with high dimensionality into two dimensions while retaining their relationships and represents them spacially - which is awesome for visualization.
+
+In our case, we're going to map all of the user attributes (total revenue, visits, hits, product views, etc.) into a two dimensional chart to see if we can identify interesting clusters of users.
+
+```{r message=FALSE}
+library(Rtsne)
+
+deduped_clean_sample = unique(clean_sample)
+set.seed(200) # for reproducibility
+transformed_data = Rtsne(deduped_clean_sample, dims=2)
+plot_data = as.data.frame(transformed_data$Y)
+
+p = plot_ly(
+  data = plot_data, 
+  x = ~V1, 
+  y = ~V2
+) %>% layout(
+  xaxis = list(
+    domain = c(-60,60),
+    title = "tSNE V1"
+  ),
+  yaxis = list(
+    domain = c(-50,50),
+    title = "tSNE V2",
+    scaleanchor = "x"
+  )
+)
+p
+```
+
+# Expectation Maximization Clustering
+
+Notice how the tSNE algorithm has clumped a bunch of users together in an interesting and visual way. With this, we're ready to cluster our users. To start, I'll try a great implementation of the expectation maximization model found in the "mclust" package:
+
+```{r message=FALSE}
+# You may want to do this first on a sample if you have a bajillion users
+
+library(mclust)
+cluster_count = 5
+cluster_model1 = Mclust(plot_data, G=1:cluster_count)
+cluster_data1 = plot_data
+cluster_data1$cluster = cluster_model1$classification
+
+p <- plot_ly(
+  data = cluster_data1, 
+  x = ~V1, 
+  y = ~V2,
+  color = ~as.factor(cluster)
+) %>% layout(
+  xaxis = list(
+    domain = c(-60,60),
+    title = "tSNE V1"
+  ),
+  yaxis = list(
+    domain = c(-50,50),
+    title = "tSNE V2",
+    scaleanchor = "x"
+  )
+)
+p
+```
+
+#Density Based Clustering
+
+You can see the EM cluster model works pretty well, but perhaps not exactly what I want. It kinda missed the group in the middle and lumped some of the outlying groups together that I wouldn't probably want. Typically tSNE is best clustered by a density based approach which we'll try next:
+
+```{r warning=FALSE,message=FALSE,error=FALSE}
+library(dbscan)
+cluster_model2 = dbscan(plot_data, minPts = 15, eps=2.3)
+clustered_data2 = plot_data
+clustered_data2$cluster = cluster_model2$cluster
+
+p = plot_ly(
+  data = clustered_data2, 
+  x = ~V1, 
+  y = ~V2,
+  color = ~as.factor(cluster)
+) %>% layout(
+  xaxis = list(
+    domain = c(-60,60),
+    title = "tSNE V1"
+  ),
+  yaxis = list(
+    domain = c(-50,50),
+    title = "tSNE V2",
+    scaleanchor = "x"
+  )
+)
+p
+```
+
+# Making sense of the clusters
+
+So this looks much better, but the problem is tSNE doesn't give me any useful information about these clusters. To do that, we'll have to append the clusters to the user_rollup for visualization. (Drag this one around to explore)
+
+```{r warning=FALSE,message=FALSE,error=FALSE}
+clustered_user_rollup = cbind(deduped_clean_sample, clustered_data2)
+
+# Visualizing the clusters for each metric:
+plot_ly(
+  data = clustered_user_rollup,
+  x = ~V1,
+  y = ~V2,
+  #z = ~as.numeric(hits),
+  #z = ~as.numeric(visits),
+  #z = ~as.numeric(email_sign_ups),
+  z = ~as.numeric(revenue),
+  #z = ~as.numeric(internal_searches),
+  #z = ~as.numeric(orders),
+  #z = ~as.numeric(product_views),
+  color = ~as.factor(cluster)
+) %>% layout( 
+  height = 650,
+  scene = list(
+    xaxis = list(
+      domain = c(-60,60),
+      title = "tSNE V1"
+    ),
+    yaxis = list(
+      domain = c(-50,50),
+      title = "tSNE V2",
+      scaleanchor = "x"
+    ),
+    zaxis = list(
+      title = "Revenue"
+    )
+  )
+)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

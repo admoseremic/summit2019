@@ -1,0 +1,133 @@
+---
+title: "Algorithmic Attribution"
+author: "Trevor Paulsen"
+output: html_notebook
+---
+
+Last year I showed how you could do algorithmic attribution using the popular Shapley Value method (if you took the session survey, you'll get the code for that too!), so this year I'll show how to do algorithmic attribution using a relatively newer method that's growing in popularity - the Markov Chain method!
+
+Check out this link for more info: http://datafeedtoolbox.com/attribution-theory-the-two-best-models-for-algorithmic-marketing-attribution-implemented-in-apache-spark-and-r/
+
+To start with attribution of any kind, best to first create a column with values for each order sequence. This ensures each order gets treated appropriately for attribution.
+
+```{r}
+# Step 1 construct order sequences for each person
+data_feed_sequenced = stitched_data_feed %>%
+  group_by(stitched_id) %>%
+  arrange(hit_time_gmt) %>%
+  mutate(
+    order_seq = lag(cumsum(orders)),
+    order_seq = ifelse((row_number() == 1) & orders > 0, -1, 
+      ifelse(row_number() == 1, 0, order_seq))
+  ) %>% ungroup()
+
+data_feed_sequenced %>% filter(stitched_id == "user_id5645") %>% select(stitched_id, hit_time_gmt, orders, order_seq)
+
+```
+
+# Creating a Channel Stack Table
+Next, we'll use a great package created by Davide Altomare, and David Loris called "ChannelAttribution". To make it work, we just need to create a summary of each order sequence as a "channel stack", or a delimited list of a sequence's channels separated by a ">". This is pretty easy to do:
+
+```{r}
+# Step 2 create a channel "stack" for each order sequence
+channel_stacks = data_feed_sequenced %>%
+  group_by(stitched_id, order_seq) %>%
+  summarize(
+    path = paste(non_attributed_channel[which(!is.na(non_attributed_channel))], collapse=" > "),
+    
+    # for Spark SQL or PostgreSQL:
+    # path = concat_ws(" > ", collect_list(non_attributed_channel))
+    
+    conversions = sum(orders)
+    
+  ) %>% ungroup() %>%
+  group_by(path) %>%
+  summarize(
+    conversions = sum(conversions),
+    
+    # also count the number of times this path occured
+    # we'll use this later to visualize!
+    path_count = n(),
+    
+    conversion_rate = conversions/path_count
+  ) %>%
+  filter(path != "") %>%
+  arrange(-conversions) %>%
+  collect()
+
+channel_stacks
+
+```
+
+# Using the ChannelAttribution Package
+Now, we can load the ChannelAttribution package to do the rest of the heavy lifting:
+
+```{r}
+library(ChannelAttribution)
+
+markov_chain_orders = markov_model(
+  channel_stacks, "path", "conversions", order=3
+)
+
+# That was easy!
+markov_chain_orders
+
+# Plotting results:
+p = markov_chain_orders %>% plot_ly(
+  x = ~channel_name,
+  y = ~round(total_conversions),
+  type = "bar"
+) %>% layout(
+  yaxis = list(title="Total Conversions"),
+  xaxis = list(title="Channel")
+)
+p
+
+```
+
+# Comparing attribution models
+Now, for fun, let's compare how different the attribution would be if we hadn't stitched the data!
+
+```{r}
+# Compare the markov attribution with heuristic models:
+
+heuristic_conversions = heuristic_models(channel_stacks, "path", "conversions")
+
+stitch_comparison = markov_chain_orders %>%
+  left_join(heuristic_conversions, by="channel_name")
+
+# Plotting comparison:
+p = stitch_comparison %>% plot_ly(
+  x = ~channel_name,
+  y = ~round(total_conversions),
+  name = "Markov Chain",
+  type = "bar"
+) %>% add_trace(
+  y = ~round(first_touch),
+  name = "First Touch"
+) %>% add_trace(
+  y = ~round(last_touch),
+  name = "Last Touch"
+) %>% add_trace(
+  y = ~round(linear_touch),
+  name = "Linear"
+) %>% layout(
+  yaxis = list(title="Total Conversions"),
+  xaxis = list(title="Channel"),
+  barmode = "group"
+)
+p
+```
+
+
+
+
+
+
+
+
+
+
+
+
+

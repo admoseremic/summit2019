@@ -1,0 +1,194 @@
+---
+title: "Building a cross-device dataset"
+author: "Trevor Paulsen"
+output: html_notebook
+---
+
+Cross device analysis is a really tricky problem! That's because there's a lot of IDs floating around and you need someway to make sense of all of them. Typically you'll have multiple cookie IDs for a single user ID (users with multiple devices), and also multiple users on a single cookie (shared devices).
+
+Do identity map, you'll need either 1) a user/login ID stored in your data like a prop or eVar or 2) an unobfuscated IP address (some localities aren't allowed to store this, so be cautious)
+
+Also - identity mapping can pose a privacy risk depending on your area of business and the countries in which you operate. I'm not a lawyer, so if you're not 100% sure on what's ok and not ok for your business, best to check with your own attorney!
+
+The basic strategy is:
+  1) combine all of the cookie/device IDs from the same IP address
+  2) split, rejoin, and merge all of those device+IP IDs based on the user IDs
+  
+More details: http://datafeedtoolbox.com/attribution-theory-cross-device-marketing-attribution-with-apache-spark-and-r/
+
+If you don't want to use the IP address at all, just skip to step 2
+
+```{r}
+# Step 1 - Combining Devices Using IP Address
+# Step 1a - identify which IPs are good for stitching
+
+ips_to_use = data_feed_ready %>%
+  group_by(ip) %>%
+  summarise(
+    visitors = n_distinct(visitor_id)
+  ) %>%
+  # Useful IPs happen on more than one cookie, but I'll also
+  # throw out IPs that have more than 20 cookies to prevent
+  # over-stitching (like a whole office building or something).
+  filter(visitors <=20 & visitors > 1) %>%
+  collect()
+
+# Plot a histogram of cookies per ip address
+library(plotly)
+p = plot_ly(x = ips_to_use$visitors, type="histogram") %>%
+  layout(
+    title="Cookies Per IP Address", 
+    xaxis=list(title="Number of IPs"), 
+    yaxis=list(title="Number of cookies")
+  )
+p
+```
+
+# Combining cookies based on common IP address
+
+Now we need to identify all of the visitor IDs (cookies) that these IP addresses apply to. Tricky because cookies can have multiple IP addresses (say if you move your device form work to home), but we'll just use the last known IP to simplify things a bit:
+
+
+```{r}
+# Step 1b - map of visitor_ids to its last known IP
+visitor_ip_lookup = data_feed_ready %>%
+  group_by(visitor_id) %>%
+  arrange(hit_time_gmt) %>%
+  summarise(
+    last_known_ip = last(ip)
+    
+    # If using Adobe Query Service or Spark SQL, you'd do it like:
+    # last_known_ip = last_value(ip)
+    
+  ) %>%
+  ungroup() %>%
+  left_join(ips_to_use, by=c("last_known_ip"="ip")) %>%
+  mutate(
+    
+    # this adds a new column for just those IPs that had 2 to 20 visitors
+    ip_stitched_user_id = ifelse(is.na(visitors), visitor_id, last_known_ip)
+  )
+  
+# Step 1c - apply the "ip_stitched_user_id" to the data feed
+data_feed_ip_blended = data_feed_ready %>%
+  left_join(visitor_ip_lookup, by="visitor_id")
+  
+# Plot a bar chart showing the visitor "compression"
+total_visitors_vs_new_ids = data_feed_ip_blended %>%
+  summarise(
+    total_visitors = n_distinct(visitor_id),
+    total_ip_stitched_people = n_distinct(ip_stitched_user_id)
+  ) %>% collect()
+
+# Plot the compression
+p = plot_ly(
+  total_visitors_vs_new_ids, 
+  values = c(total_visitors_vs_new_ids$total_visitors, total_visitors_vs_new_ids$total_visitors-total_visitors_vs_new_ids$total_ip_stitched_people),
+  type = "pie",
+  labels = c("People", "Cookies Compressed")
+)
+p
+```
+
+# Splitting cookies with multiple user IDs
+
+Now that we have stitched our cookies based on IP, we're ready to stitch based on our login ID, or if you skipped that part, you can start here. Stitching using a user ID can be tricky, espeically on a shared device - I don't want to attribute purchases I make to marketing that was exposed to someone else in my family using a shared device. To split a single cookie across multiple users I'm going to use something called "windowing" to create a new column called "id_group" using my customer id "user_id".
+
+
+```{r}
+# Step 2 - stitch the data based on the user ID
+# Step 2a: split up cookie IDs with multiple user_ids
+
+data_feed_with_id_group = data_feed_ip_blended %>% # or just use data_feed_ready
+  group_by(ip_stitched_user_id) %>% # or just visitor_id
+  arrange(hit_time_gmt) %>%
+  mutate(
+    
+    # first, add a 1 everytime I see a user_id
+    user_id_present = ifelse(!is.na(user_id), 1, NA),
+    
+    # then, do a cumsum of that new column to group hits
+    group_following_hits = cumsum(ifelse(is.na(user_id_present), 0, user_id_present)),
+    
+    # finally, bring in hits prior to first user_id
+    id_group = ifelse(group_following_hits == 0, 1, group_following_hits)
+    
+  ) %>%
+  ungroup()
+
+# validate with an id that had multiple user_ids 
+# ip_address2509 ip_address9963
+data_feed_with_id_group %>% filter(ip_stitched_user_id == "ip_address2509") %>%
+  select(ip_stitched_user_id, user_id, user_id_present, group_following_hits, id_group)
+```
+
+# Combining cookies with common user IDs
+
+Now that we've added a grouping field to split cookies with multiple user_ids, we're ready to create the ID lookup table we'll use for stitching.
+
+```{r}
+# Step 2b - create an ID lookup table
+
+id_lookup_table = data_feed_with_id_group %>%
+  group_by(ip_stitched_user_id, id_group) %>%
+  summarize(
+    stitched_id = paste0(user_id[which(!is.na(user_id))],collapse = "")
+    
+    # for Spark SQL or PostgreSQL:
+    # stitched_id = concat_ws("", collect_list(user_id))
+    
+  ) %>% ungroup() %>%
+  group_by(ip_stitched_user_id) %>%
+  arrange(id_group) %>%
+  mutate(
+    lagged_stitched_id = lag(stitched_id),
+    stitched_id = ifelse((stitched_id == "") & 
+      (id_group == max(id_group)), lagged_stitched_id, stitched_id)
+  ) %>%
+  mutate(
+    stitched_id = ifelse(is.na(stitched_id), ip_stitched_user_id, stitched_id)
+  ) %>%
+  select(
+    ip_stitched_user_id,
+    id_group,
+    stitched_id
+  )
+
+
+id_lookup_table %>% filter(ip_stitched_user_id == "ip_address2509") 
+```
+
+# Doing the final join
+
+Finally, we can join our ID lookup table to the data_feed to give us our new cross-device, stitched user ID for analysis!
+```{r}
+# Step 2c - joining the ID lookup to the data feed
+
+stitched_data_feed = data_feed_with_id_group %>%
+  left_join(id_lookup_table, by=c("ip_stitched_user_id", "id_group"))
+  
+stitched_data_feed %>% filter(ip_stitched_user_id == "ip_address2509") %>% select(ip_stitched_user_id, ip, user_id, ip_stitched_user_id)
+```
+
+
+
+
+#Visualization of the results
+Visualizing the compression we just achieved, a 24% overall compression - not too bad!
+
+```{r}
+summary_stats = stitched_data_feed %>%
+  summarize(
+    cookie_count = n_distinct(visitor_id),
+    person_count = n_distinct(stitched_id)
+  ) %>% collect()
+
+p = plot_ly(
+  summary_stats, 
+  values = c(summary_stats$person_count, summary_stats$cookie_count-summary_stats$person_count),
+  type = "pie",
+  labels = c("People", "Cookies Compressed")
+)
+p
+```
+
