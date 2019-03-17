@@ -5,14 +5,18 @@ All the code and examples from the "Advanced Analysis with Adobe Analytics Data 
 http://datafeedtoolbox.com/wp-content/uploads/2019/03/01-Introduction-to-dplyr.nb_.html
 
 02 - Preparing data feeds:
-
+http://datafeedtoolbox.com/wp-content/uploads/2019/03/02-Prepare-Data-Feed.nb_.html
 
 03 - Creating a cross-device dataset:
+http://datafeedtoolbox.com/wp-content/uploads/2019/03/03-Cross-device-datasets.nb_.html
 
 04 - Algorithmic attribution:
+http://datafeedtoolbox.com/wp-content/uploads/2019/03/04-Algorithmic-Attribution.nb_.html
 
-05 - Visualizing the custome journey:
+05 - Visualizing the customer journey:
+http://datafeedtoolbox.com/wp-content/uploads/2019/03/05-Visualizing-Customer-Journey.nb_.html
 
 06 - Clustering users/customers:
+http://datafeedtoolbox.com/wp-content/uploads/2019/03/06-Clustering-Users.nb_.html
 
 07 - Importing clusters into Adobe Analytics:
